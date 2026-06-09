@@ -1,0 +1,28 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# DataForSEO MCP finish script. Companion to ./run, same pattern as
+# ../dashboard/finish.
+#
+# When the creds are absent, ./run exits 0 immediately. Without this
+# finish script s6-supervise would restart it in a tight loop. By
+# exiting 125 when creds are missing we mark the slot as permanently
+# failed (down) so s6-svstat reflects reality. When creds ARE present
+# and the server later crashes, we exit non-125 so s6-supervise
+# restarts it — the whole point of supervision.
+#
+# Args: $1=run-exit-code $2=signal-num $3=service-dir-name $4=run-pgid.
+
+if [ -f /opt/data/.env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . /opt/data/.env
+    set +a
+fi
+
+if [ -z "${DATAFORSEO_USERNAME:-}" ] || [ -z "${DATAFORSEO_PASSWORD:-}" ]; then
+    # Creds missing — permanent-failure marker, leave slot down.
+    exit 125
+fi
+
+# Creds present — let s6-supervise restart the server on crash.
+exit 0

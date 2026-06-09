@@ -1,0 +1,41 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# DataForSEO MCP HTTP server, supervised by s6 (same pattern as
+# ../dashboard/run). Provides the keyword-research backend that the
+# `dataforseo-seo-workflow` skill calls via config.yaml
+# mcp_servers.dataforseo.url = http://127.0.0.1:3001/mcp.
+#
+# Gated on DataForSEO credentials in /opt/data/.env. When they're
+# absent the run script exits 0 and ../finish returns 125 (s6's
+# "permanent failure, do not restart"), so the slot reports down
+# instead of crash-looping — same contract as the dashboard gate.
+#
+# IMPORTANT: the port is pinned to 3001 here, NOT inherited from $PORT.
+# The container sets PORT=9119 for the dashboard; letting the MCP server
+# inherit it would collide with the dashboard bind.
+
+# with-contenv repopulates HOME from /init as /root. Reset it before
+# dropping privileges so HOME-anchored state (npm cache, etc.) lands
+# under /opt/data.
+export HOME=/opt/data
+
+# Load DataForSEO creds from the persisted env file on the volume.
+if [ -f /opt/data/.env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . /opt/data/.env
+    set +a
+fi
+
+# Gate: no creds → exit clean, finish returns 125 (slot stays down).
+if [ -z "${DATAFORSEO_USERNAME:-}" ] || [ -z "${DATAFORSEO_PASSWORD:-}" ]; then
+    echo "[dataforseo-mcp] DATAFORSEO_USERNAME/PASSWORD missing in /opt/data/.env — slot down" >&2
+    exit 0
+fi
+
+export PORT=3001
+cd /opt/data
+
+# Skip the drop when already non-root.
+[ "$(id -u)" = 0 ] || exec npx dataforseo-mcp-server@latest http
+exec s6-setuidgid hermes npx dataforseo-mcp-server@latest http
